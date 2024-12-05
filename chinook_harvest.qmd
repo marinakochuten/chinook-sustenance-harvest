@@ -1,0 +1,131 @@
+---
+title: "Chinook salmon harvest"
+subtitle: "Exploring the effect of sector on Chinook salmon harvest in the Aleutian Islands"
+author: Marina Kochuten
+date: last-modified
+format: html
+editor_options: 
+  chunk_output_type: console
+---
+
+## Background 
+
+## Data details
+
+## Hypothesis
+
+Does sector have an effect on Chinook salmon harvest? 
+- Null: Sector does not have an effect on Chinook salmon harvest
+- Alternative: Sector does have an effect on Chinook salmon harvest
+
+## Analysis
+
+#### Setup
+```{r}
+# Load libraries
+library(tidyverse)
+
+# Load data
+harvest <- read_csv("Harvest_All_Sectors.csv")
+```
+
+#### Data cleaning
+
+The data includes harvest counts for all Alaska regions. For this analysis, I am only interested in the Alaska Peninsula and Aleutian Islands:
+```{r}
+# Filter harvest data to the Alaska Peninsula and Aleutian Islands
+apai_harvest <- harvest |>
+  filter(SASAP.Region == "Alaska Peninsula and Aleutian Islands")
+```
+
+Next, I want to categorize sector into two groups: subsistence and commercial. Personal use and subsistence catch are hard to divide, as often personal use catch is used as defined by subsistence Because of this, I will group personal use and subsistence into one category (Subsistence). 
+```{r}
+# Replace all Personal Use with Subsistence
+apai_harvest$sector <- str_replace_all(apai_harvest$sector, "Personal Use", "Subsistence")
+
+# Check that Personal Use is no longer in dataset
+unique(apai_harvest$sector)
+```
+
+I want to compare Chinook salmon against all other species. Let's group all other salmon species into one group, "other". Then, I will be bale to group by species and sector to get total harvest for each species in each sector. Then, I will finish my data cleaning by filtering down to the two sectors of interest, Subsistence and Commercial.
+```{r}
+chinook_harvest <- apai_harvest |>
+  mutate(species = ifelse(species == "chinook", "chinook", "other")) |>
+  filter((sector == "Commercial") | (sector == "Subsistence")) |>
+  group_by(year, sector, species) |>
+  summarise(harvest = sum(harvest, na.rm = TRUE), .groups = "drop")
+
+chinook_grouped <- chinook_harvest |>
+  group_by(species, sector) |>
+  summarise(species_harvest = sum(harvest, na.rm = TRUE), .groups = "drop") |>
+  group_by(sector) |>
+  summarize(proportion = species_harvest[species == "chinook"] / sum(species_harvest))
+```
+
+#### Visualize the relationship
+```{r}
+ggplot(chinook_harvest, aes(x = sector, y = harvest, fill = species)) +
+  geom_boxplot() +
+  facet_wrap(~sector, scale = "free") +
+  theme_minimal()
+```
+
+```{r}
+ggplot(chinook_grouped, aes(x = sector, y = species_harvest, fill = factor(species))) +
+  geom_col() +
+  facet_wrap(~sector, scale = "free") +
+  theme_minimal()
+```
+
+#### Hypothesis testing by randomization
+
+**Step 1:** state the null and alternative hypotheses
+- Null: Sector does not have an effect on Chinook salmon harvest
+- Alternative: Sector does have an effect on Chinook salmon harvest
+
+**Step 2:** calculate the point statistic
+- The relevant sample statistic for my hypothesis is a difference in proportions between chinook total harvest / other total harvest in the commercial and subsistence sectors
+
+```{r}
+# Find chinook proportion of total harvest in each sector
+chinook_grouped <- chinook_harvest |>
+  group_by(species, sector) |>
+  summarise(species_harvest = sum(harvest, na.rm = TRUE), .groups = "drop") |>
+  group_by(sector) |>
+  summarize(proportion = species_harvest[species == "chinook"] / sum(species_harvest))
+
+# Calculate difference in proportions between sectors
+pe <- chinook_grouped$proportion[2] - chinook_grouped$proportion[1]
+
+pe
+```
+
+**Step 3:** quantify the uncertainty
+- Use randomization to simulate the distribution of the sample statistic under the null hypothesis.
+```{r}
+null_dist <- replicate(1000, {
+chinook_grouped <- chinook_harvest |>
+  mutate(sector = sample(sector, n()),
+         species = sample(species, n())) |>
+  group_by(species, sector) |>
+  summarise(species_harvest = sum(harvest, na.rm = TRUE), .groups = "drop") |>
+  group_by(sector) |>
+  summarize(proportion = species_harvest[species == "chinook"] / sum(species_harvest))
+  
+  # Calculate difference in proportions between sectors
+  pe <- chinook_prop$proportion[2] - chinook_grouped$proportion[1]
+  
+  pe
+})
+
+ggplot(tibble(null_dist), aes(null_dist)) +
+  geom_histogram(bins = 20, color = "cornflowerblue", fill = NA) +
+  geom_vline(xintercept = pe, color = "firebrick")
+```
+
+**Step 4:** calculate probability of the point estimate under the null
+```{r}
+sum(abs(null_dist) > abs(pe)) / length(null_dist)
+```
+
+
