@@ -47,19 +47,13 @@ apai_harvest$sector <- str_replace_all(apai_harvest$sector, "Personal Use", "Sub
 unique(apai_harvest$sector)
 ```
 
-I want to compare Chinook salmon against all other species. Let's group all other salmon species into one group, "other". Then, I will be bale to group by species and sector to get total harvest for each species in each sector. Then, I will finish my data cleaning by filtering down to the two sectors of interest, Subsistence and Commercial.
+I want to compare Chinook salmon against all other species. Let's group all other salmon species into one group, "other". Then, I will be able to group by species and sector to get total harvest for each species in each sector. Then, I will finish my data cleaning by filtering down to the two sectors of interest, Subsistence and Commercial.
 ```{r}
 chinook_harvest <- apai_harvest |>
   mutate(species = ifelse(species == "chinook", "chinook", "other")) |>
   filter((sector == "Commercial") | (sector == "Subsistence")) |>
   group_by(year, sector, species) |>
-  summarise(harvest = sum(harvest, na.rm = TRUE), .groups = "drop")
-
-chinook_grouped <- chinook_harvest |>
-  group_by(species, sector) |>
-  summarise(species_harvest = sum(harvest, na.rm = TRUE), .groups = "drop") |>
-  group_by(sector) |>
-  summarize(proportion = species_harvest[species == "chinook"] / sum(species_harvest))
+  summarize(harvest = sum(harvest, na.rm = TRUE), .groups = "drop")
 ```
 
 #### Visualize the relationship
@@ -67,13 +61,21 @@ chinook_grouped <- chinook_harvest |>
 ggplot(chinook_harvest, aes(x = sector, y = harvest, fill = species)) +
   geom_boxplot() +
   facet_wrap(~sector, scale = "free") +
-  theme_minimal()
+  scale_fill_brewer("Species", palette = "Pastel1") +
+  labs(x = "Number of individuals harvested",
+       y = "Fishing Sector",
+       title = "Distribution of species harvested by sector") +
+  theme_bw()
 ```
 
 ```{r}
-ggplot(chinook_grouped, aes(x = sector, y = species_harvest, fill = factor(species))) +
+ggplot(chinook_harvest, aes(x = sector, y = harvest, fill = factor(species))) +
   geom_col() +
   facet_wrap(~sector, scale = "free") +
+  scale_fill_brewer("Species", palette = "Pastel1") +
+  labs( x = "Fishing Sector", 
+        y = "Number of individuals harvested",  
+        title = "Total Chinook Harvest by Sector") +
   theme_minimal()
 ```
 
@@ -88,44 +90,48 @@ ggplot(chinook_grouped, aes(x = sector, y = species_harvest, fill = factor(speci
 
 ```{r}
 # Find chinook proportion of total harvest in each sector
-chinook_grouped <- chinook_harvest |>
+chinook_prop <- chinook_harvest |>
   group_by(species, sector) |>
   summarise(species_harvest = sum(harvest, na.rm = TRUE), .groups = "drop") |>
   group_by(sector) |>
   summarize(proportion = species_harvest[species == "chinook"] / sum(species_harvest))
 
 # Calculate difference in proportions between sectors
-pe <- chinook_grouped$proportion[2] - chinook_grouped$proportion[1]
-
+pe <- chinook_prop$proportion[2] - chinook_prop$proportion[1]
 pe
 ```
 
 **Step 3:** quantify the uncertainty
 - Use randomization to simulate the distribution of the sample statistic under the null hypothesis.
 ```{r}
+set.seed(2222)
+
 null_dist <- replicate(1000, {
-chinook_grouped <- chinook_harvest |>
-  mutate(sector = sample(sector, n()),
-         species = sample(species, n())) |>
-  group_by(species, sector) |>
-  summarise(species_harvest = sum(harvest, na.rm = TRUE), .groups = "drop") |>
-  group_by(sector) |>
-  summarize(proportion = species_harvest[species == "chinook"] / sum(species_harvest))
+  chinook_prop <- chinook_harvest |>
+    mutate(sector = sample(sector, n())) |>
+    group_by(species, sector) |>
+    summarise(species_harvest = sum(harvest, na.rm = TRUE), .groups = "drop") |>
+    group_by(sector) |>
+    summarize(proportion = species_harvest[species == "chinook"] / sum(species_harvest))
   
   # Calculate difference in proportions between sectors
-  pe <- chinook_prop$proportion[2] - chinook_grouped$proportion[1]
-  
+  pe <- chinook_prop$proportion[2] - chinook_prop$proportion[1]
   pe
 })
 
 ggplot(tibble(null_dist), aes(null_dist)) +
-  geom_histogram(bins = 20, color = "cornflowerblue", fill = NA) +
-  geom_vline(xintercept = pe, color = "firebrick")
+  geom_histogram(bins = 20, color = "#B8CCE1", fill = NA, linewidth = 1) +
+  geom_vline(xintercept = pe, color = "#F0B7B0", linewidth = 1) +
+  labs(x = "Null distribution",
+       y = "Count") +
+  theme_bw()
 ```
 
 **Step 4:** calculate probability of the point estimate under the null
 ```{r}
-sum(abs(null_dist) > abs(pe)) / length(null_dist)
+pval <- sum(abs(null_dist) > abs(pe)) / length(null_dist)
+print(pval)
 ```
 
+The p-value 0 is less than the threshold, 0.05. So, I am able to reject the null hypothesis and say that there is a 0% chance that the relationship is due to random chance. I find that sector does have an effect on the proportion of Chinook harvest. 
 
